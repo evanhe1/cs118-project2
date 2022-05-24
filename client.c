@@ -208,11 +208,36 @@ int main (int argc, char *argv[])
     //       single data packet, and then tears down the connection without
     //       handling data loss.
     //       Only for demo purpose. DO NOT USE IT in your final submission
+    int base = seqNum;
+    int nextseqnum = seqNum + m;
+    int nextWindowIndex = 1;
+    int endseqnum = -1;
+    ackpkt.seqnum = synackpkt.seqnum; // hacky but lets me keep logic consistent
     while (1) {
         n = recvfrom(sockfd, &ackpkt, PKT_SIZE, 0, (struct sockaddr *) &servaddr, (socklen_t *) &servaddrlen);
-        if (n > 0) {
-            break;
+        if (n >= 0) {
+            printRecv(&ackpkt);
+            base = ackpkt.acknum;
+            printf("%d\n", base);
+            printf("%d\n", endseqnum);
+            if (ackpkt.acknum == endseqnum)
+                break;
         }
+        while (nextseqnum < base + WND_SIZE * PAYLOAD_SIZE) {
+            m = fread(buf, 1, PAYLOAD_SIZE, fp);
+            if (m == 0)
+            {
+                endseqnum = nextseqnum;
+                break;
+            }
+            buildPkt(&pkts[nextWindowIndex], nextseqnum, (ackpkt.seqnum + 1) % MAX_SEQN, 0, 0, 1, 0, m, buf);
+            printSend(&pkts[nextWindowIndex], 0);
+            sendto(sockfd, &pkts[nextWindowIndex], PKT_SIZE, 0, (struct sockaddr*) &servaddr, servaddrlen);
+            timer = setTimer();
+            buildPkt(&pkts[nextWindowIndex], nextseqnum, (ackpkt.seqnum + 1) % MAX_SEQN, 0, 0, 0, 1, m, buf);
+            nextWindowIndex = (nextWindowIndex + 1) % WND_SIZE;
+            nextseqnum = (nextseqnum + m) % MAX_SEQN;
+            }
     }
 
     // *** End of your client implementation ***

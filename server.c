@@ -200,13 +200,20 @@ int main (int argc, char *argv[])
                 printRecv(&recvpkt);
 
                 if (recvpkt.fin) {
-                    cliSeqNum = (cliSeqNum + 1) % MAX_SEQN;
+                    cliSeqNum = (recvpkt.seqnum + 1) % MAX_SEQN;
 
-                    buildPkt(&ackpkt, seqNum, cliSeqNum, 0, 0, 1, 0, 0, NULL);
+                    buildPkt(&ackpkt, seqNum, (recvpkt.seqnum + 1) % MAX_SEQN, 0, 0, 1, 0, 0, NULL);
                     printSend(&ackpkt, 0);
                     sendto(sockfd, &ackpkt, PKT_SIZE, 0, (struct sockaddr*) &cliaddr, cliaddrlen);
 
                     break;
+                }
+                else {
+                    fwrite(recvpkt.payload, 1, recvpkt.length, fp);
+                    seqNum = recvpkt.acknum;
+                    buildPkt(&ackpkt, recvpkt.acknum, recvpkt.seqnum + recvpkt.length, 0, 0, 1, 0, 0, NULL);
+                    printSend(&ackpkt, 0);
+                    sendto(sockfd, &ackpkt, PKT_SIZE, 0, (struct sockaddr*) &cliaddr, cliaddrlen);
                 }
             }
         }
