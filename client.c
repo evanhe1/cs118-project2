@@ -81,7 +81,7 @@ int isTimeout(double end) {
     struct timeval s;
     gettimeofday(&s, NULL);
     double start = (double) s.tv_sec + (double) s.tv_usec/1000000;
-    return ((end - start) < 0.0);
+    return (end != -1 && (end - start) < 0.0);
 }
 
 // =====================================
@@ -204,40 +204,84 @@ int main (int argc, char *argv[])
     // *** TODO: Implement the rest of reliable transfer in the client ***
     // Implement GBN for basic requirement or Selective Repeat to receive bonus
 
-    // Note: the following code is not the complete logic. It only sends a
-    //       single data packet, and then tears down the connection without
-    //       handling data loss.
-    //       Only for demo purpose. DO NOT USE IT in your final submission
-    int base = seqNum;
-    int nextseqnum = seqNum + m;
-    int nextWindowIndex = 1;
-    int endseqnum = -1;
+    int base = seqNum; // base sequence number
+    int baseWindowIndex = 0; // index of packet with sequence number base within pkt array
+    int nextseqnum = seqNum + m; // first unsent sequence number
+    int nextWindowIndex = 1; // index of packet with sequence number nextseqnum within pkt array
+    int endseqnum = -1; // sequence number representing byte after last byte in file, uses as termination condition
+    int prevBase = base; // temporary variable used to determine if base has increased
     ackpkt.seqnum = synackpkt.seqnum; // hacky but lets me keep logic consistent
+    int key = 0; // break deadlock when baseWindowIndex == nextWindowIndex and there entire pkt is actually acked
     while (1) {
         n = recvfrom(sockfd, &ackpkt, PKT_SIZE, 0, (struct sockaddr *) &servaddr, (socklen_t *) &servaddrlen);
         if (n >= 0) {
             printRecv(&ackpkt);
+            prevBase = base;
             base = ackpkt.acknum;
-            printf("%d\n", base);
-            printf("%d\n", endseqnum);
+            if (base > prevBase)
+            {
+                baseWindowIndex = (baseWindowIndex + ((base - prevBase) / PAYLOAD_SIZE)) % WND_SIZE;
+            }
+            // termination condition, works in tandem with m == 0 check to break out of outside loop
             if (ackpkt.acknum == endseqnum)
                 break;
-        }
-        while (nextseqnum < base + WND_SIZE * PAYLOAD_SIZE) {
-            m = fread(buf, 1, PAYLOAD_SIZE, fp);
-            if (m == 0)
+            if (base == nextseqnum) // only occurs when all 10 packets acked at once
             {
-                endseqnum = nextseqnum;
-                break;
+                key = 1;
+                timer = -1; // timeout will not occur while timer is set to -1
             }
-            buildPkt(&pkts[nextWindowIndex], nextseqnum, (ackpkt.seqnum + 1) % MAX_SEQN, 0, 0, 1, 0, m, buf);
-            printSend(&pkts[nextWindowIndex], 0);
-            sendto(sockfd, &pkts[nextWindowIndex], PKT_SIZE, 0, (struct sockaddr*) &servaddr, servaddrlen);
+            else
+            {
+                timer = setTimer();
+            }
+        }
+        else if (isTimeout(timer))
+        {
+            printTimeout(&pkts[baseWindowIndex]);
             timer = setTimer();
-            buildPkt(&pkts[nextWindowIndex], nextseqnum, (ackpkt.seqnum + 1) % MAX_SEQN, 0, 0, 0, 1, m, buf);
-            nextWindowIndex = (nextWindowIndex + 1) % WND_SIZE;
-            nextseqnum = (nextseqnum + m) % MAX_SEQN;
+            int i = baseWindowIndex;
+            if (baseWindowIndex >= nextWindowIndex) // account for wrapping around in pkts array
+            {
+                while (i < WND_SIZE)
+                {
+                    printSend(&pkts[i], 0);
+                    sendto(sockfd, &pkts[i], PKT_SIZE, 0, (struct sockaddr*) &servaddr, servaddrlen);
+                    i++;
+                }
+                i %= WND_SIZE;
             }
+            while (i < nextWindowIndex)
+            {
+                printSend(&pkts[i], 0);
+                sendto(sockfd, &pkts[i], PKT_SIZE, 0, (struct sockaddr*) &servaddr, servaddrlen);
+                i = (i + 1) % WND_SIZE;
+            }
+        }
+        else {
+            int numToSend = (baseWindowIndex + WND_SIZE - nextWindowIndex) % WND_SIZE;
+            if (key == 1 && numToSend == 0)
+            {
+                numToSend = 10;
+                key = 0;
+            }
+            key = 0;
+            for (int i = 0; i < numToSend; i++) {
+                m = fread(buf, 1, PAYLOAD_SIZE, fp);
+                if (m == 0) // no more bytes to read
+                {
+                    // works with ackpkt.acknum == endseqnum condition to break out of outside loop
+                    endseqnum = nextseqnum;
+                    break;
+                }
+                buildPkt(&pkts[nextWindowIndex], nextseqnum, 0, 0, 0, 0, 0, m, buf);
+                printSend(&pkts[nextWindowIndex], 0);
+                sendto(sockfd, &pkts[nextWindowIndex], PKT_SIZE, 0, (struct sockaddr*) &servaddr, servaddrlen);
+                if (base == nextseqnum)
+                    timer = setTimer();
+                nextWindowIndex = (nextWindowIndex + 1) % WND_SIZE;
+                nextseqnum = (nextseqnum + m) % MAX_SEQN;
+            }
+        }
     }
 
     // *** End of your client implementation ***

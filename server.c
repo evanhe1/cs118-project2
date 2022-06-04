@@ -150,7 +150,7 @@ int main (int argc, char *argv[])
                 n = recvfrom(sockfd, &ackpkt, PKT_SIZE, 0, (struct sockaddr *) &cliaddr, (socklen_t *) &cliaddrlen);
                 if (n > 0) {
                     printRecv(&ackpkt);
-                    if (ackpkt.seqnum == cliSeqNum && ackpkt.ack && ackpkt.acknum == (synackpkt.seqnum + 1) % MAX_SEQN) {
+                    if (ackpkt.seqnum == cliSeqNum && (ackpkt.ack || ackpkt.dupack) && ackpkt.acknum == (synackpkt.seqnum + 1) % MAX_SEQN) {
 
                         int length = snprintf(NULL, 0, "%d", i) + 6;
                         char* filename = malloc(length);
@@ -188,10 +188,6 @@ int main (int argc, char *argv[])
         // *** TODO: Implement the rest of reliable transfer in the server ***
         // Implement GBN for basic requirement or Selective Repeat to receive bonus
 
-        // Note: the following code is not the complete logic. It only expects 
-        //       a single data packet, and then tears down the connection
-        //       without handling data loss.
-        //       Only for demo purpose. DO NOT USE IT in your final submission
         struct packet recvpkt;
 
         while(1) {
@@ -208,10 +204,16 @@ int main (int argc, char *argv[])
 
                     break;
                 }
-                else {
+                else if (recvpkt.seqnum == cliSeqNum) {
                     fwrite(recvpkt.payload, 1, recvpkt.length, fp);
-                    seqNum = recvpkt.acknum;
-                    buildPkt(&ackpkt, recvpkt.acknum, recvpkt.seqnum + recvpkt.length, 0, 0, 1, 0, 0, NULL);
+                    cliSeqNum = (cliSeqNum + recvpkt.length) % MAX_SEQN;
+                    buildPkt(&ackpkt, seqNum, (recvpkt.seqnum + recvpkt.length) % MAX_SEQN, 0, 0, 1, 0, 0, NULL);
+                    printSend(&ackpkt, 0);
+                    sendto(sockfd, &ackpkt, PKT_SIZE, 0, (struct sockaddr*) &cliaddr, cliaddrlen);
+                }
+                else 
+                {
+                    buildPkt(&ackpkt, seqNum, cliSeqNum % MAX_SEQN, 0, 0, 0, 1, 0, NULL);
                     printSend(&ackpkt, 0);
                     sendto(sockfd, &ackpkt, PKT_SIZE, 0, (struct sockaddr*) &cliaddr, cliaddrlen);
                 }

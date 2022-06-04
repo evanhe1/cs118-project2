@@ -1,0 +1,6 @@
+*.file
+*.txt
+testfile*
+test*loss*.py
+*.bin
+*.sh
