@@ -4,3 +4,4 @@ testfile*
 test*loss*.py
 *.bin
 *.sh
+.DS_Store

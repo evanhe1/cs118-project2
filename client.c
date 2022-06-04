@@ -220,7 +220,11 @@ int main (int argc, char *argv[])
             base = ackpkt.acknum;
             if (base > prevBase)
             {
-                baseWindowIndex = (baseWindowIndex + ((base - prevBase) / PAYLOAD_SIZE)) % WND_SIZE;
+                baseWindowIndex = (baseWindowIndex + ((base - prevBase + PAYLOAD_SIZE - 1) / PAYLOAD_SIZE)) % WND_SIZE;
+            }
+            else if (base < WND_SIZE * PAYLOAD_SIZE && prevBase + WND_SIZE * PAYLOAD_SIZE >= MAX_SEQN) // special case of overflow on previous iteration
+            {
+                baseWindowIndex = (baseWindowIndex + ((base + MAX_SEQN - prevBase + PAYLOAD_SIZE - 1) / PAYLOAD_SIZE)) % WND_SIZE;
             }
             // termination condition, works in tandem with m == 0 check to break out of outside loop
             if (ackpkt.acknum == endseqnum)
@@ -244,7 +248,7 @@ int main (int argc, char *argv[])
             {
                 while (i < WND_SIZE)
                 {
-                    printSend(&pkts[i], 0);
+                    printSend(&pkts[i], 1);
                     sendto(sockfd, &pkts[i], PKT_SIZE, 0, (struct sockaddr*) &servaddr, servaddrlen);
                     i++;
                 }
@@ -257,30 +261,28 @@ int main (int argc, char *argv[])
                 i = (i + 1) % WND_SIZE;
             }
         }
-        else {
-            int numToSend = (baseWindowIndex + WND_SIZE - nextWindowIndex) % WND_SIZE;
-            if (key == 1 && numToSend == 0)
-            {
-                numToSend = 10;
-                key = 0;
-            }
+        int numToSend = (baseWindowIndex + WND_SIZE - nextWindowIndex) % WND_SIZE;
+        if (key == 1 && numToSend == 0)
+        {
+            numToSend = 10;
             key = 0;
-            for (int i = 0; i < numToSend; i++) {
-                m = fread(buf, 1, PAYLOAD_SIZE, fp);
-                if (m == 0) // no more bytes to read
-                {
-                    // works with ackpkt.acknum == endseqnum condition to break out of outside loop
-                    endseqnum = nextseqnum;
-                    break;
-                }
-                buildPkt(&pkts[nextWindowIndex], nextseqnum, 0, 0, 0, 0, 0, m, buf);
-                printSend(&pkts[nextWindowIndex], 0);
-                sendto(sockfd, &pkts[nextWindowIndex], PKT_SIZE, 0, (struct sockaddr*) &servaddr, servaddrlen);
-                if (base == nextseqnum)
-                    timer = setTimer();
-                nextWindowIndex = (nextWindowIndex + 1) % WND_SIZE;
-                nextseqnum = (nextseqnum + m) % MAX_SEQN;
+        }
+        key = 0;
+        for (int i = 0; i < numToSend; i++) {
+            m = fread(buf, 1, PAYLOAD_SIZE, fp);
+            if (m == 0) // no more bytes to read
+            {
+                // works with ackpkt.acknum == endseqnum condition to break out of outside loop
+                endseqnum = nextseqnum;
+                break;
             }
+            buildPkt(&pkts[nextWindowIndex], nextseqnum, 0, 0, 0, 0, 0, m, buf);
+            printSend(&pkts[nextWindowIndex], 0);
+            sendto(sockfd, &pkts[nextWindowIndex], PKT_SIZE, 0, (struct sockaddr*) &servaddr, servaddrlen);
+            if (base == nextseqnum)
+                timer = setTimer();
+            nextWindowIndex = (nextWindowIndex + 1) % WND_SIZE;
+            nextseqnum = (nextseqnum + m) % MAX_SEQN;
         }
     }
 
